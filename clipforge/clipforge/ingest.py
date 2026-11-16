@@ -68,17 +68,20 @@ def download_section(url: str, dest: Path, start: float, end: float, cfg) -> Pat
 
 def download_audio(url: str, dest: Path, cfg) -> Path:
     dest.parent.mkdir(parents=True, exist_ok=True)
-    proc = run(
-        [
-            "yt-dlp",
-            *_base_args(cfg),
-            "-f", _format(cfg, audio_only=True),
-            "-o", str(dest.with_suffix(".%(ext)s")),
-            url,
-        ],
-        check=False,
-        timeout=3600,
-    )
+    args = [
+        "yt-dlp",
+        *_base_args(cfg),
+        "-f", _format(cfg, audio_only=True),
+    ]
+    # Cap the fallback download: a 6 hour stream is ~400 MB of audio, which is
+    # a lot to spend on a highlight curve when disk is tight.
+    cap = float(getattr(cfg, "signal_max_minutes", 0) or 0)
+    if cap > 0:
+        args += ["--download-sections", f"*0-{int(cap * 60)}"]
+    args += [
+        "-o", str(dest.with_suffix(".%(ext)s")),
+        url,
+    ]
     if proc.returncode != 0:
         raise RuntimeError(f"audio download failed: {(proc.stderr or '')[-1200:]}")
     if not dest.is_file():

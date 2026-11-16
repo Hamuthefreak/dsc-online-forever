@@ -246,3 +246,25 @@ def find_font_file(explicit: str | None = None) -> Path | None:
 
 def iter_files(root: Path, pattern: str) -> Iterable[Path]:
     return sorted(p for p in Path(root).glob(pattern) if p.is_file())
+
+
+def free_mb(path: Path) -> float:
+    """Free space (MB) on the volume holding `path`, walking up if it is missing."""
+    probe = Path(path).expanduser()
+    while not probe.exists() and probe != probe.parent:
+        probe = probe.parent
+    try:
+        return shutil.disk_usage(probe).free / (1024 * 1024)
+    except OSError:
+        return float("inf")
+
+
+def dir_size_mb(path: Path) -> float:
+    total = 0
+    for item in Path(path).rglob("*"):
+        try:
+            if item.is_file():
+                total += item.stat().st_size
+        except OSError:
+            continue
+    return total / (1024 * 1024)

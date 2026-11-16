@@ -36,6 +36,49 @@ Both are exercised the first time you run `clipforge run` on a real URL without 
 
 ---
 
+## Storage (measured, not estimated)
+
+Installed footprint on a fresh install:
+
+| Piece | Size | Notes |
+| --- | --- | --- |
+| Python deps (venv) | **570 MB** | `av` 128, `ctranslate2` 148, `onnxruntime` 78, `numpy` 66, `yt-dlp` 25, rest small |
+| ffmpeg + ffprobe | **40–60 MB** | OS package (`apt`/`brew`/`winget`). The **static** builds are 77 MB *each* (153 MB) |
+| Whisper model | **72 MB** tiny · 138 base · 461 small · 1457 medium · 2944 large-v3 | downloaded once into `HF_HOME` |
+| Per finished clip | **~4.5 MB** at 1080p CRF 19 (~2.6 MB at 720p CRF 23) | +125 KB thumbnail, ~1 KB captions |
+| Peak working space during a run | **100–200 MB** | source windows only, deleted when the run ends |
+
+So a working install is **≈700 MB with `tiny`**, **≈1.1 GB with `small`**, and every run needs
+roughly **150 MB of headroom** while it works plus ~5 MB per clip kept.
+
+Tight disk? One flag does the work:
+
+```bash
+clipforge run URL --low-disk      # tiny ASR + 720p source + CRF 23  (~35% smaller everything)
+```
+
+Or move the two big things off the main disk entirely — this is the real answer if you only have
+2 GB free, because then the install costs your main disk **almost nothing**:
+
+```bash
+export HF_HOME=/d/clipforge/models      # Whisper cache  (Windows: setx HF_HOME D:\clipforge\models)
+export CLIPFORGE_OUT=/d/clipforge/runs  # clips and all working files
+pip install --no-cache-dir -e ".[chat,mcp]"   # skips a ~300 MB pip wheel cache
+```
+
+Housekeeping:
+
+```bash
+clipforge clean --all                 # delete source scratch + rejected clips, report MB freed
+clipforge clean <run> --dry-run       # preview first
+clipforge clean <run> --purge         # delete the whole run (clips included)
+```
+
+A run refuses to start if free space drops under `CLIPFORGE_MIN_FREE_MB` (default 300), and
+`clipforge doctor` prints your free space and current usage instead of failing halfway through a render.
+
+---
+
 ## Install
 
 Needs **ffmpeg + ffprobe** on PATH, Python 3.10+, and a GPU is optional but much faster.

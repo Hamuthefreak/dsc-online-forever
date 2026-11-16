@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import re
+import shutil
 import urllib.request
 from pathlib import Path
 
@@ -150,6 +151,7 @@ def make_thumbnail(clip: Path, out: Path, hook: str, cfg, *, at: float | None = 
 
     font = find_font_file(cfg.caption_font_file)
     composed, lines = _compose(base, out, (hook or "WATCH THIS").upper(), font)
+    shutil.rmtree(tmp, ignore_errors=True)  # scratch frames, ~250 KB per clip
     if not composed:
         out.write_bytes(base.read_bytes())
         return out, {"frame_at": round(duration * picked_ratio, 2), "text_overlay": False,

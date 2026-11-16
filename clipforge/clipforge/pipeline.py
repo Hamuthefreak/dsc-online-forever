@@ -13,6 +13,7 @@ from .config import Settings
 from .highlights import Candidate
 from .util import (
     audio_energy_series,
+    free_mb,
     human_duration,
     log,
     measure_loudness,
@@ -70,6 +71,13 @@ def run_pipeline(opts: RunOptions) -> dict:
         targets = [(url, None) for url in opts.urls]
 
     runs = []
+    free = free_mb(cfg.out_dir)
+    if free < cfg.min_free_mb:
+        raise RuntimeError(
+            f"only {free:.0f} MB free on {Path(cfg.out_dir).expanduser().resolve()} "
+            f"(CLIPFORGE_MIN_FREE_MB={cfg.min_free_mb}). Free space, lower the guard, "
+            f"run `clipforge clean --all`, or point CLIPFORGE_OUT at another drive."
+        )
     for index, (url, local) in enumerate(targets, start=1):
         label = _slug_for(url, local)
         run_id = opts.run_id

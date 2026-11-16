@@ -104,6 +104,11 @@ class Settings:
     postiz_key: str | None = field(default_factory=lambda: _env("POSTIZ_API_KEY"))
     postiz_url: str = field(default_factory=lambda: _env("POSTIZ_URL", "https://api.postiz.com/public/v1") or "")
 
+    # disk safety
+    min_free_mb: int = field(default_factory=lambda: _env_int("CLIPFORGE_MIN_FREE_MB", 300))
+    signal_max_minutes: float = field(default_factory=lambda: _env_float("CLIPFORGE_SIGNAL_MAX_MINUTES", 0.0))
+    low_disk: bool = field(default_factory=lambda: _env_bool("CLIPFORGE_LOW_DISK", False))
+
     def as_dict(self) -> dict:
         data = asdict(self)
         data["out_dir"] = str(self.out_dir)
@@ -115,6 +120,21 @@ class Settings:
     @property
     def youtube(self) -> bool:  # pragma: no cover - trivial
         return True
+
+    def apply_low_disk(self) -> "Settings":
+        """Smallest-footprint profile: tiny ASR, 720p source, CRF 23.
+
+        Anything set explicitly (env or CLI flag) still wins, so this is a
+        default, not a lock.
+        """
+        if _env("CLIPFORGE_ASR_MODEL") is None:
+            self.asr_model = "tiny"
+        if _env("CLIPFORGE_MAX_HEIGHT") is None:
+            self.max_source_height = 720
+        if _env("CLIPFORGE_CRF") is None:
+            self.crf = 23
+        self.low_disk = True
+        return self
 
 
 def settings_with(settings: Settings, **overrides) -> Settings:

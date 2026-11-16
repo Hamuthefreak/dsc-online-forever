@@ -11,7 +11,7 @@ from . import __version__, ingest
 from .config import Settings
 from .pipeline import RunOptions, run_pipeline
 from .review import decide, load, summary
-from .util import human_duration, log, read_json, write_json
+from .util import dir_size_mb, free_mb, human_duration, log, read_json, write_json
 
 
 def _ids(raw: str | None) -> list[str]:
@@ -45,7 +45,10 @@ def _apply_flags(cfg: Settings, args) -> Settings:
 
 
 def cmd_run(args) -> int:
-    cfg = _apply_flags(Settings(), args)
+    cfg = Settings()
+    if getattr(args, "low_disk", False) or cfg.low_disk:
+        cfg.apply_low_disk()
+    cfg = _apply_flags(cfg, args)
     result = run_pipeline(RunOptions(
         urls=list(args.urls or []),
         settings=cfg,
@@ -128,7 +131,7 @@ def cmd_doctor(args) -> int:
     rows = []
     rows.append(("ffmpeg", shutil.which("ffmpeg") or "MISSING"))
     rows.append(("ffprobe", shutil.which("ffprobe") or "MISSING"))
-    rows.append(("yt-dlp", shutil.which("yt-dlp") or "MISSING"))
+    rows.append(("yt-dlp", shutil.which("yt-dlp") or "MISSING (pip install yt-dlp / activate your venv)"))
     try:
         import faster_whisper  # noqa: F401
 
@@ -159,12 +162,83 @@ def cmd_doctor(args) -> int:
     has_llm = "set" if cfg.openai_api_key else "not set (heuristic metadata)"
     rows.append(("OPENAI_API_KEY", has_llm))
     rows.append(("poster", cfg.poster))
+
+    out_dir = Path(cfg.out_dir).expanduser().resolve()
+    free = free_mb(out_dir)
+    rows.append(("out_dir", str(out_dir)))
+    rows.append(("free space", f"{free:.0f} MB" + ("  LOW" if free < cfg.min_free_mb else "")))
+    if out_dir.is_dir():
+        rows.append(("runs on disk", f"{dir_size_mb(out_dir):.0f} MB"))
+    rows.append(("asr_model", f"{cfg.asr_model} (tiny 72 MB | base 138 | small 461 | medium 1457 | large-v3 2944)"))
+    rows.append(("low-disk mode", "on" if cfg.low_disk else "off (--low-disk)"))
+
     print(f"clipforge {__version__}")
     for name, value in rows:
         print(f"  {name:<18} {value}")
-    print(f"  {'out_dir':<18} {Path(cfg.out_dir).expanduser().resolve()}")
     ok = shutil.which("ffmpeg") and shutil.which("ffprobe") and shutil.which("yt-dlp")
     return 0 if ok else 1
+
+
+def cmd_clean(args) -> int:
+    """Reclaim disk: scratch sources, rejected clips, then whole runs with --purge."""
+    cfg = Settings()
+    if getattr(args, "out", None):
+        cfg.out_dir = Path(args.out)
+    root = Path(cfg.out_dir).expanduser().resolve()
+    if not root.is_dir():
+        raise SystemExit(f"no runs directory at {root}")
+
+    if args.all:
+        targets = sorted(p for p in root.iterdir() if p.is_dir())
+    elif args.run:
+        targets = [root / args.run]
+    else:
+        raise SystemExit("pass a run id, or --all")
+
+    freed = 0.0
+    for run_dir in targets:
+        if not run_dir.is_dir():
+            raise SystemExit(f"run not found: {run_dir}")
+        prefix = "would delete" if args.dry_run else "deleting"
+
+        if args.purge:
+            size = dir_size_mb(run_dir)
+            print(f"  {prefix} run {run_dir.name}  {size:.1f} MB")
+            if not args.dry_run:
+                shutil.rmtree(run_dir, ignore_errors=True)
+            freed += size
+            continue
+
+        state = load(run_dir)
+        clips = state.get("clips", {})
+        doomed: list[Path] = []
+        source = run_dir / "source"
+        if source.is_dir():
+            doomed.append(source)
+        for cid, entry in clips.items():
+            # Always stay inside this run directory: never act on a recorded
+            # absolute path that may point somewhere else on the machine.
+            clip_dir = run_dir / "clips" / cid
+            if not clip_dir.is_dir():
+                continue
+            if entry.get("status") == "rejected" and not args.keep_rejected:
+                doomed.append(clip_dir)
+                continue
+            frames = clip_dir / "_frames"
+            if frames.is_dir():
+                doomed.append(frames)
+
+        for path in doomed:
+            size = dir_size_mb(path)
+            freed += size
+            print(f"  {prefix} {path.relative_to(root)}  {size:.2f} MB")
+            if not args.dry_run:
+                shutil.rmtree(path, ignore_errors=True)
+        if not doomed:
+            print(f"  {run_dir.name}: nothing to reclaim")
+
+    print(f"\n{'would free' if args.dry_run else 'freed'}: {freed:.1f} MB")
+    return 0
 
 
 def cmd_selftest(args) -> int:
@@ -199,6 +273,8 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--run-id")
     run.add_argument("--out", help="runs directory")
     run.add_argument("--keep-source", action="store_true")
+    run.add_argument("--low-disk", action="store_true", dest="low_disk",
+                     help="smallest footprint: tiny ASR + 720p source + CRF 23")
     run.add_argument("--json", action="store_true")
     run.set_defaults(func=cmd_run)
 
@@ -224,6 +300,15 @@ def build_parser() -> argparse.ArgumentParser:
     st.add_argument("--json", action="store_true")
     st.add_argument("--out")
     st.set_defaults(func=cmd_status)
+
+    clean = sub.add_parser("clean", help="reclaim disk space from runs")
+    clean.add_argument("run", nargs="?", help="run id (omit with --all)")
+    clean.add_argument("--all", action="store_true", help="every run in the runs directory")
+    clean.add_argument("--purge", action="store_true", help="delete the whole run, approved clips included")
+    clean.add_argument("--keep-rejected", action="store_true", dest="keep_rejected")
+    clean.add_argument("--dry-run", action="store_true", dest="dry_run")
+    clean.add_argument("--out")
+    clean.set_defaults(func=cmd_clean)
 
     sub.add_parser("doctor", help="check dependencies and keys").set_defaults(func=cmd_doctor)
     sub.add_parser("selftest", help="render a synthetic clip end-to-end").set_defaults(func=cmd_selftest)
