@@ -1,0 +1,15 @@
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.env
+runs/
+*.mp4
+*.mkv
+*.wav
+*.srt
+*.ass
+*.jpg
+*.log
+.pytest_cache/
+_verify/

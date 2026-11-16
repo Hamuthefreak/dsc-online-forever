@@ -1,0 +1,9 @@
+Roboto-Bold.ttf is bundled so burned captions render identically on machines
+without system fonts (CI, containers, fresh Windows installs).
+
+Roboto is licensed under the Apache License, Version 2.0.
+Source: https://github.com/googlefonts/roboto
+Copyright 2011 Google Inc. All Rights Reserved.
+
+Replace it with any .ttf/.otf you prefer and point CLIPFORGE_CAPTION_FONT_FILE at
+it; set CLIPFORGE_CAPTION_FONT to the font's family name (e.g. "Impact").
